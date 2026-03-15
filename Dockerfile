@@ -210,6 +210,20 @@ RUN chown devuser:devuser /home/devuser/.config/nvim/lua/plugins/blink-override.
     && echo "==> blink.cmp override installed"
 
 # -----------------------------------------------------------------------------
+# Bake user config stub and options.lua into the LazyVim config
+#
+# user.lua    — stub that loads dvim.user and dvim.project via pcall
+#              these are mounted at runtime by the dvim launcher
+# options.lua — LazyVim options entry point, calls require("config.user")
+# -----------------------------------------------------------------------------
+COPY nvim-config/lua/config/options.lua /home/devuser/.config/nvim/lua/config/options.lua
+COPY nvim-config/lua/config/user.lua    /home/devuser/.config/nvim/lua/config/user.lua
+RUN mkdir -p /home/devuser/.config/nvim/lua/dvim \
+    && chown -R devuser:devuser /home/devuser/.config/nvim/lua/config/ \
+    && chown -R devuser:devuser /home/devuser/.config/nvim/lua/dvim/ \
+    && echo "==> user.lua and options.lua installed"
+
+# -----------------------------------------------------------------------------
 # Pre-install all lazy.nvim plugins headlessly
 #
 # Run as devuser so all plugin files are created with correct ownership.

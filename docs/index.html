@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dvim — Docker-powered Neovim</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Variables ── */
+    :root {
+      --bg:          #0d0f14;
+      --bg-card:     #13161e;
+      --bg-terminal: #0a0c10;
+      --border:      #1e2330;
+      --border-bright: #2a3040;
+      --text:        #c8cdd8;
+      --text-dim:    #5a6175;
+      --text-bright: #eef0f5;
+      --green:       #78e08f;
+      --green-dim:   #1a3d22;
+      --cyan:        #56cfe1;
+      --cyan-dim:    #0e2f38;
+      --yellow:      #ffd166;
+      --red:         #ef4565;
+      --purple:      #a78bfa;
+      --accent:      #78e08f;
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      line-height: 1.7;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Grid scanline overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(255,255,255,0.012) 2px,
+          rgba(255,255,255,0.012) 4px
+        );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ── */
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── Nav ── */
+    nav {
+      padding: 24px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 20px;
+      color: var(--green);
+      letter-spacing: -0.5px;
+      text-decoration: none;
+    }
+
+    .nav-logo span { color: var(--text-dim); }
+
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 12px;
+      letter-spacing: 0.5px;
+      transition: color 0.15s;
+    }
+
+    .nav-links a:hover { color: var(--text-bright); }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 96px 0 72px;
+      position: relative;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      color: var(--green);
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 2px;
+      margin-bottom: 32px;
+      animation: fadeUp 0.5s ease both;
+    }
+
+    .hero-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(42px, 7vw, 72px);
+      font-weight: 800;
+      color: var(--text-bright);
+      line-height: 1.05;
+      letter-spacing: -2px;
+      margin-bottom: 24px;
+      animation: fadeUp 0.5s 0.1s ease both;
+    }
+
+    h1 .accent { color: var(--green); }
+
+    .hero-sub {
+      font-size: 15px;
+      color: var(--text-dim);
+      max-width: 520px;
+      line-height: 1.8;
+      margin-bottom: 48px;
+      animation: fadeUp 0.5s 0.2s ease both;
+    }
+
+    .hero-sub strong { color: var(--text); font-weight: 600; }
+
+    /* ── Install block ── */
+    .install-block {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-bright);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 48px;
+      animation: fadeUp 0.5s 0.3s ease both;
+    }
+
+    .install-bar {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .install-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .install-dots span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border-bright);
+    }
+
+    .install-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+    }
+
+    .install-body {
+      padding: 20px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .install-cmd {
+      color: var(--text-bright);
+      font-size: 13px;
+      flex: 1;
+    }
+
+    .install-cmd .prompt { color: var(--green); user-select: none; }
+    .install-cmd .cmd-curl { color: var(--cyan); }
+    .install-cmd .cmd-url { color: var(--yellow); }
+    .install-cmd .cmd-pipe { color: var(--text-dim); }
+    .install-cmd .cmd-bash { color: var(--purple); }
+
+    .copy-btn {
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      color: var(--green);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      padding: 6px 14px;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .copy-btn:hover {
+      background: var(--green);
+      color: var(--bg);
+    }
+
+    .copy-btn.copied {
+      background: var(--green);
+      color: var(--bg);
+    }
+
+    /* ── Feature pills ── */
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 72px;
+      animation: fadeUp 0.5s 0.4s ease both;
+    }
+
+    .pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 2px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .pill .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+    }
+
+    /* ── Section title ── */
+    .section-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Cards ── */
+    .cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 64px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      padding: 28px 24px;
+    }
+
+    .card-icon {
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+
+    .card h3 {
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-bright);
+      margin-bottom: 8px;
+    }
+
+    .card p {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.7;
+    }
+
+    /* ── Terminal blocks ── */
+    .terminal {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-bright);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 32px;
+    }
+
+    .terminal-bar {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 5px;
+    }
+
+    .terminal-dots span {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+    }
+
+    .d1 { background: #ef4565; }
+    .d2 { background: #ffd166; }
+    .d3 { background: #78e08f; }
+
+    .terminal-title {
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+    }
+
+    .terminal-body {
+      padding: 20px 20px;
+    }
+
+    .terminal-body pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      line-height: 1.9;
+      white-space: pre-wrap;
+    }
+
+    .t-comment { color: var(--text-dim); }
+    .t-prompt   { color: var(--green); }
+    .t-cmd      { color: var(--text-bright); }
+    .t-string   { color: var(--yellow); }
+    .t-key      { color: var(--cyan); }
+    .t-val      { color: var(--purple); }
+    .t-out      { color: var(--text-dim); }
+
+    /* ── Config section ── */
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 64px;
+    }
+
+    .config-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .config-card-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .config-card-header .tag {
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 2px;
+    }
+
+    .tag-global {
+      background: var(--cyan-dim);
+      color: var(--cyan);
+      border: 1px solid var(--cyan);
+    }
+
+    .tag-project {
+      background: var(--green-dim);
+      color: var(--green);
+      border: 1px solid var(--green);
+    }
+
+    .config-card-path {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .config-card pre {
+      padding: 16px;
+      font-size: 11.5px;
+      line-height: 1.8;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 32px;
+    }
+
+    footer .left {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    footer .left strong { color: var(--green); }
+
+    footer .links {
+      display: flex;
+      gap: 20px;
+    }
+
+    footer a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 12px;
+      transition: color 0.15s;
+    }
+
+    footer a:hover { color: var(--text-bright); }
+
+    /* ── Animations ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      .cards       { grid-template-columns: 1fr; }
+      .config-grid { grid-template-columns: 1fr; }
+      .install-body { flex-direction: column; align-items: flex-start; }
+      footer       { flex-direction: column; gap: 16px; align-items: flex-start; }
+      .nav-links   { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Nav -->
+  <nav>
+    <a href="/" class="nav-logo">d<span>vim</span></a>
+    <ul class="nav-links">
+      <li><a href="#usage">usage</a></li>
+      <li><a href="#config">config</a></li>
+      <li><a href="https://github.com/ashmin-bhattarai/dvim">github</a></li>
+      <li><a href="https://hub.docker.com/r/ashmin78/dvim">docker hub</a></li>
+    </ul>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-badge">neovim · lazyvim · docker</div>
+
+    <h1>Your IDE,<br /><span class="accent">anywhere.</span></h1>
+
+    <p class="hero-sub">
+      <strong>dvim</strong> is a fully configured Neovim environment packed into a
+      single Docker image. Pull it, run it — LazyVim, LSPs, treesitter parsers,
+      and all plugins baked in. No setup. No drift. Identical everywhere.
+    </p>
+
+    <!-- Install command -->
+    <div class="install-block">
+      <div class="install-bar">
+        <div class="install-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <span class="install-label">install</span>
+        <span></span>
+      </div>
+      <div class="install-body">
+        <div class="install-cmd">
+          <span class="prompt">$ </span><span class="cmd-curl">curl</span>
+          <span> -fsSL </span>
+          <span class="cmd-url">https://get.dvim.ashmin.info.np/install.sh</span>
+          <span class="cmd-pipe"> | </span>
+          <span class="cmd-bash">bash</span>
+        </div>
+        <button class="copy-btn" onclick="copyInstall(this)">copy</button>
+      </div>
+    </div>
+
+    <!-- Feature pills -->
+    <div class="pills">
+      <div class="pill"><span class="dot" style="background:var(--green)"></span>Neovim 0.11+</div>
+      <div class="pill"><span class="dot" style="background:var(--cyan)"></span>LazyVim defaults</div>
+      <div class="pill"><span class="dot" style="background:var(--yellow)"></span>pyright · ts_ls · lua_ls</div>
+      <div class="pill"><span class="dot" style="background:var(--purple)"></span>50 treesitter parsers</div>
+      <div class="pill"><span class="dot" style="background:var(--red)"></span>Persistent undo & sessions</div>
+      <div class="pill"><span class="dot" style="background:var(--green)"></span>Zero config to start</div>
+    </div>
+  </section>
+
+  <!-- What is it -->
+  <section style="margin-bottom:64px">
+    <div class="section-title">what you get</div>
+    <div class="cards">
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h3>Instant start</h3>
+        <p>Plugins, LSPs, and parsers are baked into the image. First launch is as fast as every other launch.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🌍</div>
+        <h3>Works everywhere</h3>
+        <p>Same image on your laptop, remote server, or CI. Docker handles the rest.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">💾</div>
+        <h3>Persistent state</h3>
+        <p>Undo history, sessions, and marks survive container restarts via host-mounted state dirs.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔧</div>
+        <h3>Configurable</h3>
+        <p>System-wide and per-project config via simple Lua files. No rebuild needed.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Usage -->
+  <section id="usage" style="margin-bottom:64px">
+    <div class="section-title">usage</div>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dots">
+          <span class="d1"></span><span class="d2"></span><span class="d3"></span>
+        </div>
+        <span class="terminal-title">terminal</span>
+      </div>
+      <div class="terminal-body">
+        <pre><span class="t-comment"># open nvim in current directory</span>
+<span class="t-prompt">$ </span><span class="t-cmd">dvim</span>
+
+<span class="t-comment"># open a specific file</span>
+<span class="t-prompt">$ </span><span class="t-cmd">dvim</span> <span class="t-string">myfile.py</span>
+
+<span class="t-comment"># install a specific image tag</span>
+<span class="t-prompt">$ </span><span class="t-cmd">curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash -s v1.0</span>
+
+<span class="t-comment"># pull latest image and update launcher</span>
+<span class="t-prompt">$ </span><span class="t-cmd">dvim update</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Config -->
+  <section id="config" style="margin-bottom:64px">
+    <div class="section-title">configuration</div>
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:24px;line-height:1.8">
+      dvim uses two optional Lua config files. Drop them on your host — no image rebuild needed.
+      Project config takes priority over system-wide config.
+    </p>
+
+    <div class="config-grid">
+      <div class="config-card">
+        <div class="config-card-header">
+          <span class="tag tag-global">global</span>
+          <span class="config-card-path">~/.config/dvim/user.lua</span>
+        </div>
+        <pre><span class="t-comment">-- options</span>
+<span class="t-key">vim.opt</span><span class="t-cmd">.relativenumber</span> <span class="t-cmd">=</span> <span class="t-val">true</span>
+<span class="t-key">vim.opt</span><span class="t-cmd">.scrolloff</span> <span class="t-cmd">=</span> <span class="t-val">8</span>
+
+<span class="t-comment">-- keymaps</span>
+<span class="t-key">vim.keymap</span><span class="t-cmd">.set(</span><span class="t-string">"n"</span><span class="t-cmd">,</span>
+  <span class="t-string">"&lt;leader&gt;q"</span><span class="t-cmd">,</span>
+  <span class="t-string">"&lt;cmd&gt;q&lt;cr&gt;"</span><span class="t-cmd">)</span></pre>
+      </div>
+
+      <div class="config-card">
+        <div class="config-card-header">
+          <span class="tag tag-project">project</span>
+          <span class="config-card-path">.dvim.lua</span>
+        </div>
+        <pre><span class="t-comment">-- project-specific overrides</span>
+<span class="t-key">vim.opt</span><span class="t-cmd">.tabstop</span> <span class="t-cmd">=</span> <span class="t-val">2</span>
+<span class="t-key">vim.opt</span><span class="t-cmd">.shiftwidth</span> <span class="t-cmd">=</span> <span class="t-val">2</span>
+
+<span class="t-comment">-- project-local keymap</span>
+<span class="t-key">vim.keymap</span><span class="t-cmd">.set(</span><span class="t-string">"n"</span><span class="t-cmd">,</span>
+  <span class="t-string">"&lt;leader&gt;r"</span><span class="t-cmd">,</span>
+  <span class="t-string">"&lt;cmd&gt;!make&lt;cr&gt;"</span><span class="t-cmd">)</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="left">
+      built by <strong>ashmin-bhattarai</strong> · MIT license
+    </div>
+    <div class="links">
+      <a href="https://github.com/ashmin-bhattarai/dvim">github</a>
+      <a href="https://hub.docker.com/r/ashmin78/dvim">docker hub</a>
+      <a href="https://github.com/ashmin-bhattarai/dvim/issues">issues</a>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  function copyInstall(btn) {
+    const cmd = 'curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash';
+    navigator.clipboard.writeText(cmd).then(() => {
+      btn.textContent = 'copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  }
+</script>
+
+</body>
+</html>
