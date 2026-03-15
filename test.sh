@@ -338,7 +338,7 @@ output=$(timeout "${TEST_TIMEOUT}" \
     "${IMAGE}" sh -c 'echo done' \
     2>&1 || echo "timeout")
 assert_contains "Entrypoint runs and remaps UID/GID" "${output}" "Dropping privileges"
-assert_contains "Entrypoint detects workspace owner" "${output}" "Detected /workspace owner"
+assert_contains "Entrypoint detects workspace owner" "${output}" "Detected project owner"
 rm -rf "${tmpdir}"
 
 # =============================================================================

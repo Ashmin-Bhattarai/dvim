@@ -5,14 +5,11 @@ set -euo pipefail
 # entrypoint.sh
 #
 # Responsibilities:
-#   1. Detect UID/GID of /workspace (mounted volume)
-#   2. Remap internal 'devuser' to match host UID/GID
-#   3. Fix ownership of devuser's home directory (only when remapping occurred)
-#   4. Drop privileges via gosu and exec nvim
-#
-# This ensures files created/edited inside the container are owned by the
-# same UID/GID as the host user who mounted the volume — no root-owned
-# files left behind.
+#   1. Detect UID/GID of mounted project dir and remap devuser to match
+#   2. Fix home ownership if remapping occurred
+#   3. Create /workspace symlink → actual project path
+#   4. Detect Python venv in project root, generate pyrightconfig.json
+#   5. Drop privileges via gosu and launch nvim
 # =============================================================================
 
 LOG_PREFIX="[entrypoint]"
@@ -22,37 +19,47 @@ warn() { echo "${LOG_PREFIX} WARN: $*" >&2; }
 die()  { echo "${LOG_PREFIX} ERROR: $*" >&2; exit 1; }
 
 # -----------------------------------------------------------------------------
-# Detect host UID/GID from the mounted workspace
+# The project is mounted at its actual host path (e.g. /home/user/myapp)
+# HOST_PROJECT_PATH is set by the dvim launcher
 # -----------------------------------------------------------------------------
-WORKSPACE="/workspace"
+PROJECT_PATH="${HOST_PROJECT_PATH:-/workspace}"
 
-if [ ! -d "${WORKSPACE}" ]; then
-    warn "/workspace does not exist or is not mounted."
-    warn "Falling back to devuser UID/GID 1000:1000."
-    WORKSPACE_UID=1000
-    WORKSPACE_GID=1000
-else
-    WORKSPACE_UID=$(stat -c '%u' "${WORKSPACE}")
-    WORKSPACE_GID=$(stat -c '%g' "${WORKSPACE}")
-    log "Detected /workspace owner — UID=${WORKSPACE_UID} GID=${WORKSPACE_GID}"
+if [ ! -d "${PROJECT_PATH}" ]; then
+    warn "Project path '${PROJECT_PATH}' does not exist or is not mounted."
+    warn "Falling back to /workspace"
+    PROJECT_PATH="/workspace"
+    mkdir -p "${PROJECT_PATH}"
+fi
+
+log "Project path: ${PROJECT_PATH}"
+
+# -----------------------------------------------------------------------------
+# Create /workspace symlink → actual project path
+# Allows 'cd /workspace' to always work regardless of mount path
+# -----------------------------------------------------------------------------
+if [ "${PROJECT_PATH}" != "/workspace" ]; then
+    rm -f /workspace 2>/dev/null || true
+    ln -sf "${PROJECT_PATH}" /workspace
+    log "Symlink: /workspace → ${PROJECT_PATH}"
 fi
 
 # -----------------------------------------------------------------------------
-# Safety guard: refuse to run as root inside the container
+# Detect UID/GID from the mounted project directory
 # -----------------------------------------------------------------------------
+WORKSPACE_UID=$(stat -c '%u' "${PROJECT_PATH}")
+WORKSPACE_GID=$(stat -c '%g' "${PROJECT_PATH}")
+log "Detected project owner — UID=${WORKSPACE_UID} GID=${WORKSPACE_GID}"
+
+# Safety guard: refuse root
 if [ "${WORKSPACE_UID}" = "0" ]; then
-    warn "/workspace is owned by root (UID=0)."
-    warn "Running as root inside the container is not allowed."
-    warn "Falling back to devuser UID/GID 1000:1000."
+    warn "Project dir is owned by root (UID=0) — falling back to 1000:1000."
     WORKSPACE_UID=1000
     WORKSPACE_GID=1000
 fi
 
 # -----------------------------------------------------------------------------
-# Remap devuser to match host UID/GID
-#
-# We track whether any remapping actually happened via REMAPPED flag.
-# This lets us skip the expensive recursive chown when nothing changed.
+# Remap devuser UID/GID to match host user
+# Only chown home if remapping actually happened (expensive on large dirs)
 # -----------------------------------------------------------------------------
 CURRENT_UID=$(id -u devuser)
 CURRENT_GID=$(id -g devuser)
@@ -70,22 +77,14 @@ fi
 
 if [ "${WORKSPACE_UID}" != "${CURRENT_UID}" ]; then
     log "Remapping devuser user: ${CURRENT_UID} → ${WORKSPACE_UID}"
-    # -o allows non-unique UID in case host UID collides with another system user
     usermod -u "${WORKSPACE_UID}" -o devuser
     REMAPPED=1
 else
     log "User UID already matches (${CURRENT_UID}), skipping usermod."
 fi
 
-# -----------------------------------------------------------------------------
-# Fix ownership of devuser's home directory — only when remapping occurred.
-#
-# Skipped when UID/GID already match to avoid a costly recursive chown over
-# thousands of plugin and LSP files baked into /home/devuser/.local/
-# On a typical run where host UID=1000 matches devuser, this is never run.
-# -----------------------------------------------------------------------------
 if [ "${REMAPPED}" = "1" ]; then
-    log "UID/GID remapped — fixing ownership of /home/devuser (this runs once per new UID)..."
+    log "UID/GID remapped — fixing ownership of /home/devuser..."
     chown -R "${WORKSPACE_UID}:${WORKSPACE_GID}" /home/devuser
     log "Ownership fixed."
 else
@@ -93,24 +92,98 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Drop privileges and exec nvim
+# Python venv detection and pyrightconfig.json generation
 #
-# gosu is used instead of su/sudo because:
-#   - It does a clean exec (no extra shell process)
-#   - It properly drops supplementary groups
-#   - It is the Docker-recommended way to drop privileges
+# Priority:
+#   1. .venv/ in project root  → use it
+#   2. venv/ in project root   → use it
+#   3. pyrightconfig.json exists → let pyright handle it natively, skip
+#   4. pyproject.toml exists   → let pyright handle it natively, skip
+#   5. none found              → no config generated, pyright uses global python
 #
-# "$@" passes any arguments the user provides, e.g.:
-#   docker run ... yourimage myfile.py   → opens myfile.py directly
-#   docker run ... yourimage             → opens nvim at /workspace
+# The generated config is written to /tmp/pyrightconfig.json inside the
+# container only — the host project dir is never modified.
+#
+# DVIM_PYRIGHT_CONFIG env var is set so the nvim pyright LSP config
+# can point pyright at the right config file.
+# -----------------------------------------------------------------------------
+PYRIGHT_CONFIG_PATH=""
+VENV_PATH=""
+
+# Check for existing user-managed pyright config first — don't override
+if [ -f "${PROJECT_PATH}/pyrightconfig.json" ]; then
+    log "Found pyrightconfig.json in project — using it as-is."
+    PYRIGHT_CONFIG_PATH="${PROJECT_PATH}/pyrightconfig.json"
+elif [ -f "${PROJECT_PATH}/pyproject.toml" ] && grep -q '\[tool\.pyright\]' "${PROJECT_PATH}/pyproject.toml" 2>/dev/null; then
+    log "Found [tool.pyright] in pyproject.toml — pyright will read it natively."
+    # No generated config needed — pyright finds pyproject.toml automatically
+else
+    # Auto-detect venv
+    if [ -d "${PROJECT_PATH}/.venv" ]; then
+        VENV_PATH="${PROJECT_PATH}/.venv"
+        log "Detected venv: ${VENV_PATH}"
+    elif [ -d "${PROJECT_PATH}/venv" ]; then
+        VENV_PATH="${PROJECT_PATH}/venv"
+        log "Detected venv: ${VENV_PATH}"
+    else
+        log "No venv found in project root — pyright will use global python."
+    fi
+
+    # Generate pyrightconfig.json if venv found
+    if [ -n "${VENV_PATH}" ]; then
+        PYRIGHT_CONFIG_PATH="/tmp/pyrightconfig.json"
+        log "Setting up pyrightconfig.json"
+
+        # Detect actual Python version from the venv binary
+        # Falls back to 3.12 if detection fails
+        PYTHON_VERSION="3.12"
+        VENV_PYTHON="${VENV_PATH}/bin/python"
+        log "Detected VENV_PYTHON: ${VENV_PYTHON}"
+        if [ -x "${VENV_PYTHON}" ]; then
+            log "Venv Found"
+            DETECTED=$(${VENV_PYTHON} --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
+            if [ -n "${DETECTED}" ]; then
+                PYTHON_VERSION="${DETECTED}"
+                log "Detected Python version from venv: ${PYTHON_VERSION}"
+            fi
+        else
+            log "Venv Not Found"
+        fi
+
+        log "Generating ${PYRIGHT_CONFIG_PATH} for venv: ${VENV_PATH}"
+        cat > "${PYRIGHT_CONFIG_PATH}" << PYRIGHT_EOF
+{
+  "pythonVersion": "${PYTHON_VERSION}",
+  "venvPath": "${PROJECT_PATH}",
+  "venv": "$(basename "${VENV_PATH}")",
+  "include": ["${PROJECT_PATH}"],
+  "exclude": [
+    "${VENV_PATH}",
+    "${PROJECT_PATH}/.git",
+    "${PROJECT_PATH}/__pycache__",
+    "${PROJECT_PATH}/.mypy_cache"
+  ],
+  "reportMissingImports": true,
+  "reportMissingModuleSource": false
+}
+PYRIGHT_EOF
+        chown "${WORKSPACE_UID}:${WORKSPACE_GID}" "${PYRIGHT_CONFIG_PATH}"
+        log "pyrightconfig.json generated with venv: $(basename "${VENV_PATH}") (Python ${PYTHON_VERSION})"
+    fi
+fi
+
+# Export for nvim LSP config to consume
+export DVIM_PYRIGHT_CONFIG="${PYRIGHT_CONFIG_PATH}"
+export DVIM_PROJECT_PATH="${PROJECT_PATH}"
+
+# -----------------------------------------------------------------------------
+# Drop privileges and launch nvim
 # -----------------------------------------------------------------------------
 log "Dropping privileges to devuser (UID=${WORKSPACE_UID} GID=${WORKSPACE_GID})"
 log "Launching nvim..."
 
 if [ "$#" -eq 0 ]; then
-    # No arguments — open nvim at workspace root
-    exec gosu devuser nvim "${WORKSPACE}"
+    exec gosu devuser nvim "${PROJECT_PATH}"
 else
-    # Arguments provided — pass them directly to nvim
     exec gosu devuser nvim "$@"
 fi

@@ -208,6 +208,10 @@ RUN echo "==> Cloning LazyVim starter config..." \
 COPY blink-override.lua /home/devuser/.config/nvim/lua/plugins/blink-override.lua
 RUN chown devuser:devuser /home/devuser/.config/nvim/lua/plugins/blink-override.lua \
     && echo "==> blink.cmp override installed"
+COPY pyright-override.lua /home/devuser/.config/nvim/lua/plugins/pyright-override.lua
+RUN chown devuser:devuser /home/devuser/.config/nvim/lua/plugins/pyright-override.lua \
+    && echo "==> pyright override installed"
+
 
 # -----------------------------------------------------------------------------
 # Bake user config stub and options.lua into the LazyVim config

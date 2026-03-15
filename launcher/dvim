@@ -2,12 +2,6 @@
 # =============================================================================
 # dvim — Docker Vim launcher
 #
-# Launches ashmin78/dvim Docker image with:
-#   - Current directory mounted as /workspace
-#   - System-wide config mounted if ~/.config/dvim/user.lua exists
-#   - Project config mounted if .dvim.lua exists in current dir
-#   - Persistent state (undo, sessions, history) via ~/.local/share/dvim/
-#
 # Install:
 #   curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash
 #   curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash -s v1.0
@@ -26,13 +20,13 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
-# Configuration — set at install time
+# Configuration
 # -----------------------------------------------------------------------------
-DVIM_IMAGE="${DVIM_IMAGE:-ashmin78/dvim:latest}"
+DVIM_IMAGE="${DVIM_IMAGE:-ashminbhattarai/dvim:latest}"
 DVIM_CONFIG_DIR="${HOME}/.config/dvim"
 DVIM_STATE_DIR="${HOME}/.local/share/dvim"
 DVIM_REPO_DIR="${HOME}/.local/share/dvim/repo"
-DVIM_LAUNCHER_DIR="${HOME}/.local/bin"
+DVIM_BIN_DIR="${HOME}/.local/bin"
 
 # -----------------------------------------------------------------------------
 # Colors
@@ -49,129 +43,130 @@ die()  { echo -e "${RED}[dvim] ERROR:${RESET} $*" >&2; exit 1; }
 
 # -----------------------------------------------------------------------------
 # update subcommand
-# Pull latest image and update launcher from repo
 # -----------------------------------------------------------------------------
 cmd_update() {
-  local tag="${1:-latest}"
-  log "Pulling image ashmin78/dvim:${tag}..."
-  docker pull "ashmin78/dvim:${tag}"
+    local tag="${1:-latest}"
+    log "Pulling image ashminbhattarai/dvim:${tag}..."
+    docker pull "ashminbhattarai/dvim:${tag}"
 
-  if [ -d "${DVIM_REPO_DIR}" ]; then
-    log "Updating launcher from repo..."
-    git -C "${DVIM_REPO_DIR}" pull --ff-only
-    install -m755 "${DVIM_REPO_DIR}/launcher/dvim" "${DVIM_LAUNCHER_DIR}/dvim"
-    log "Launcher updated."
-  else
-    warn "Repo not found at ${DVIM_REPO_DIR} — skipping launcher update."
-    warn "Re-run the install script to fix this."
-  fi
+    if [ -d "${DVIM_REPO_DIR}" ]; then
+        log "Updating launcher from repo..."
+        git -C "${DVIM_REPO_DIR}" pull --ff-only
+        install -m755 "${DVIM_REPO_DIR}/launcher/dvim" "${DVIM_BIN_DIR}/dvim"
+        log "Launcher updated."
+    else
+        warn "Repo not found at ${DVIM_REPO_DIR} — skipping launcher update."
+        warn "Re-run the install script to fix this."
+    fi
 
-  log "Update complete. Image: ashmin78/dvim:${tag}"
+    log "Update complete. Image: ashminbhattarai/dvim:${tag}"
 }
 
 # -----------------------------------------------------------------------------
 # Handle subcommands
 # -----------------------------------------------------------------------------
 if [ "${1:-}" = "update" ]; then
-  cmd_update "${2:-latest}"
-  exit 0
+    cmd_update "${2:-latest}"
+    exit 0
 fi
 
 # -----------------------------------------------------------------------------
 # Ensure Docker is available
 # -----------------------------------------------------------------------------
 if ! command -v docker &>/dev/null; then
-  die "Docker is not installed or not on PATH."
+    die "Docker is not installed or not on PATH."
 fi
 
 if ! docker info &>/dev/null; then
-  die "Docker daemon is not running."
+    die "Docker daemon is not running."
 fi
 
 # -----------------------------------------------------------------------------
-# Ensure the image exists locally
-# If DVIM_IMAGE points to a local image (no registry prefix, no tag with slash)
-# we skip pulling. Otherwise pull if missing.
+# Ensure the image exists locally — pull if missing
 # -----------------------------------------------------------------------------
 if docker image inspect "${DVIM_IMAGE}" &>/dev/null; then
-  : # image exists locally, nothing to do
+    : # image exists locally, nothing to do
 else
-  log "Image ${DVIM_IMAGE} not found locally. Pulling..."
-  if ! docker pull "${DVIM_IMAGE}"; then
-    die "Failed to pull ${DVIM_IMAGE}. If using a local image, build it first with: docker build -t ${DVIM_IMAGE} ."
-  fi
+    log "Image ${DVIM_IMAGE} not found locally. Pulling..."
+    if ! docker pull "${DVIM_IMAGE}"; then
+        die "Failed to pull ${DVIM_IMAGE}. If using a local image, build it first with: docker build -t ${DVIM_IMAGE} ."
+    fi
 fi
+
+# -----------------------------------------------------------------------------
+# Resolve absolute project path
+# This ensures paths inside the container match the host exactly,
+# which is critical for Python venv detection and LSP path resolution.
+# -----------------------------------------------------------------------------
+PROJECT_PATH="$(pwd)"
 
 # -----------------------------------------------------------------------------
 # Ensure persistent state directories exist
-# These survive container restarts, giving you undo history, sessions, etc.
 # -----------------------------------------------------------------------------
 mkdir -p \
-  "${DVIM_STATE_DIR}/state" \
-  "${DVIM_STATE_DIR}/shada" \
-  "${DVIM_STATE_DIR}/swap"
+    "${DVIM_STATE_DIR}/state" \
+    "${DVIM_STATE_DIR}/shada" \
+    "${DVIM_STATE_DIR}/swap"
 
 # -----------------------------------------------------------------------------
 # Build docker run arguments
 # -----------------------------------------------------------------------------
 DOCKER_ARGS=(
-  run
-  --rm
-  --interactive
-  --tty
+    run
+    --rm
+    --interactive
+    --tty
 
-  # Project files — current working directory
-  --volume "$(pwd):/workspace"
-  --workdir /workspace
+    # Mount project at SAME absolute path as host
+    # e.g. /home/user/myapp → /home/user/myapp inside container
+    # This ensures venv paths, LSP paths, and all absolute references match
+    --volume "${PROJECT_PATH}:${PROJECT_PATH}"
+    --workdir "${PROJECT_PATH}"
+
+    # Tell entrypoint where the project is mounted
+    --env "HOST_PROJECT_PATH=${PROJECT_PATH}"
 )
 
 # -----------------------------------------------------------------------------
 # System-wide user config
 # ~/.config/dvim/user.lua → lua/dvim/user.lua inside container
-# Loaded by the baked user.lua stub via pcall(require, "dvim.user")
 # -----------------------------------------------------------------------------
 USER_CONFIG="${DVIM_CONFIG_DIR}/user.lua"
 if [ -f "${USER_CONFIG}" ]; then
-  DOCKER_ARGS+=(--volume "${USER_CONFIG}:/home/devuser/.config/nvim/lua/dvim/user.lua:ro")
-  log "Loading user config: ${USER_CONFIG}"
+    DOCKER_ARGS+=(--volume "${USER_CONFIG}:/home/devuser/.config/nvim/lua/dvim/user.lua:ro")
+    log "Loading user config: ${USER_CONFIG}"
 fi
 
 # -----------------------------------------------------------------------------
 # Project-level config
 # .dvim.lua in current dir → lua/dvim/project.lua inside container
-# Loaded after user config so project settings take priority
 # -----------------------------------------------------------------------------
-PROJECT_CONFIG="$(pwd)/.dvim.lua"
+PROJECT_CONFIG="${PROJECT_PATH}/.dvim.lua"
 if [ -f "${PROJECT_CONFIG}" ]; then
-  DOCKER_ARGS+=(--volume "${PROJECT_CONFIG}:/home/devuser/.config/nvim/lua/dvim/project.lua:ro")
-  log "Loading project config: ${PROJECT_CONFIG}"
+    DOCKER_ARGS+=(--volume "${PROJECT_CONFIG}:/home/devuser/.config/nvim/lua/dvim/project.lua:ro")
+    log "Loading project config: ${PROJECT_CONFIG}"
 fi
 
 # -----------------------------------------------------------------------------
 # Persistent state mounts
 #
-# ~/.local/share/dvim/state  → ~/.local/state/nvim   (undo, sessions)
-# ~/.local/share/dvim/shada  → ~/.local/share/nvim/shada (history, marks)
-# ~/.local/share/dvim/swap   → ~/.local/state/nvim/swap  (swap files)
-#
-# These dirs are on the host so state survives container restarts.
-# Plugin and LSP dirs are NOT mounted — they stay baked in the image.
+# ~/.local/share/dvim/state → ~/.local/state/nvim   (undo, sessions)
+# ~/.local/share/dvim/shada → ~/.local/share/nvim/shada (history, marks)
+# ~/.local/share/dvim/swap  → ~/.local/state/nvim/swap  (swap files)
 # -----------------------------------------------------------------------------
 DOCKER_ARGS+=(
-  --volume "${DVIM_STATE_DIR}/state:/home/devuser/.local/state/nvim"
-  --volume "${DVIM_STATE_DIR}/shada:/home/devuser/.local/share/nvim/shada"
-  --volume "${DVIM_STATE_DIR}/swap:/home/devuser/.local/state/nvim/swap"
+    --volume "${DVIM_STATE_DIR}/state:/home/devuser/.local/state/nvim"
+    --volume "${DVIM_STATE_DIR}/shada:/home/devuser/.local/share/nvim/shada"
+    --volume "${DVIM_STATE_DIR}/swap:/home/devuser/.local/state/nvim/swap"
 )
 
 # -----------------------------------------------------------------------------
-# Image and arguments
-# Pass all arguments to nvim inside the container
+# Image and pass-through arguments
 # -----------------------------------------------------------------------------
 DOCKER_ARGS+=("${DVIM_IMAGE}")
 
-# Pass any user-provided arguments directly to nvim via entrypoint
 if [ "$#" -gt 0 ]; then
-  DOCKER_ARGS+=("$@")
+    DOCKER_ARGS+=("$@")
 fi
 
 # -----------------------------------------------------------------------------

@@ -8,7 +8,7 @@
 #
 # What this does:
 #   1. Checks prerequisites (docker, git, curl)
-#   2. Pulls ashmin78/dvim Docker image (default: latest, or specified tag)
+#   2. Pulls ashminbhattarai/dvim Docker image (default: latest, or specified tag)
 #   3. Clones the dvim repo to ~/.local/share/dvim/repo
 #   4. Installs dvim launcher to ~/.local/bin/dvim
 #   5. Adds ~/.local/bin to PATH in ~/.bashrc if not already there
@@ -23,7 +23,7 @@ set -euo pipefail
 # Configuration
 # -----------------------------------------------------------------------------
 DVIM_TAG="${1:-latest}"
-DVIM_IMAGE="ashmin78/dvim:${DVIM_TAG}"
+DVIM_IMAGE="ashminbhattarai/dvim:${DVIM_TAG}"
 DVIM_REPO="https://github.com/ashmin-bhattarai/dvim.git"
 DVIM_REPO_DIR="${HOME}/.local/share/dvim/repo"
 DVIM_BIN_DIR="${HOME}/.local/bin"
@@ -82,14 +82,19 @@ success "Docker daemon is running"
 
 # -----------------------------------------------------------------------------
 # Step 2: Pull Docker image
+# Skip pulling if image already exists locally (useful for local development)
 # -----------------------------------------------------------------------------
 header "Pulling Docker image"
 
-log "Pulling ${DVIM_IMAGE}..."
-if docker pull "${DVIM_IMAGE}"; then
-  success "Image pulled: ${DVIM_IMAGE}"
+if docker image inspect "${DVIM_IMAGE}" &>/dev/null; then
+  success "Image already available locally: ${DVIM_IMAGE}"
 else
-  die "Failed to pull image ${DVIM_IMAGE}. Check your internet connection and Docker Hub."
+  log "Pulling ${DVIM_IMAGE}..."
+  if docker pull "${DVIM_IMAGE}"; then
+    success "Image pulled: ${DVIM_IMAGE}"
+  else
+    die "Failed to pull image ${DVIM_IMAGE}.\nIf developing locally, build and tag the image first:\n  docker build -t ${DVIM_IMAGE} ."
+  fi
 fi
 
 # -----------------------------------------------------------------------------
@@ -115,7 +120,15 @@ fi
 header "Installing launcher"
 
 mkdir -p "${DVIM_BIN_DIR}"
-install -m755 "${DVIM_REPO_DIR}/launcher/dvim" "${DVIM_BIN_DIR}/dvim"
+
+# Try repo first (normal install), fall back to direct download
+if [ -f "${DVIM_REPO_DIR}/launcher/dvim" ]; then
+  install -m755 "${DVIM_REPO_DIR}/launcher/dvim" "${DVIM_BIN_DIR}/dvim"
+else
+  log "Launcher not in repo, downloading directly..."
+  curl -fsSL "https://raw.githubusercontent.com/ashmin-bhattarai/dvim/main/launcher/dvim"     -o "${DVIM_BIN_DIR}/dvim"
+  chmod +x "${DVIM_BIN_DIR}/dvim"
+fi
 success "Launcher installed: ${DVIM_BIN_DIR}/dvim"
 
 # -----------------------------------------------------------------------------
