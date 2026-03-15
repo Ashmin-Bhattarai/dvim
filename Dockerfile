@@ -81,7 +81,7 @@ RUN echo "==> Downloading Node.js v${NODE_VERSION}..." \
     && echo "==> Extracting Node.js..." \
     && tar -xJf node.tar.xz \
     && mv "node-v${NODE_VERSION}-linux-x64" /opt/node \
-    && echo "==> Node.js installed:" \
+    && echo "==> Node.js extracted:" \
     && /opt/node/bin/node --version
 
 # =============================================================================
@@ -246,25 +246,23 @@ RUN echo "==> Pre-installing LSPs via Mason (this may take a while)..." \
 # -----------------------------------------------------------------------------
 # Compile treesitter parsers headlessly
 #
-# TSUpdateSync compiles all parsers that LazyVim enables by default.
-# This requires gcc (from build-essential) and tree-sitter-cli (installed
-# above via npm). The compiled .so files land in:
-#   ~/.local/share/nvim/lazy/nvim-treesitter/parser/
+# The new nvim-treesitter main branch (required by LazyVim v15+) is fully
+# async. TSUpdateSync no longer exists. The correct API is:
+#   install.install({parsers}):wait(timeout_ms)
 #
-# These .so files are copied to the final stage — build-essential is not.
-# defer_fn with 300s timeout: parser compilation can be slow for many parsers.
+# The script is kept in ts_compile.lua (separate file, not inlined here).
+# gcc (from build-essential) and tree-sitter-cli (from npm) must be on PATH.
+#
+# Parsers compiled here are the LazyVim defaults. The resulting .so files
+# are copied to the final stage — build-essential is NOT.
 # -----------------------------------------------------------------------------
-RUN echo "==> Compiling treesitter parsers (this may take a while)..." \
-    && su devuser -c ' \
-        nvim --headless \
-             "+lua vim.defer_fn(function() vim.cmd([[TSUpdateSync]]) end, 5000)" \
-             "+lua vim.defer_fn(function() vim.cmd([[qa!]]) end, 300000)" \
-        2>&1 \
-    ' \
-    && echo "==> Treesitter parser compilation complete" \
-    && echo "==> Compiled parsers:" \
-    && ls /home/devuser/.local/share/nvim/lazy/nvim-treesitter/parser/ 2>/dev/null \
-    || echo "WARNING: parser dir not found — TSUpdateSync may have failed"
+COPY ts_compile.lua /tmp/ts_compile.lua
+RUN echo "==> Starting treesitter parser compilation (this will take several minutes)..." \
+    && su devuser -c "nvim --headless -u /tmp/ts_compile.lua 2>&1" \
+    && echo "==> Treesitter compilation step complete" \
+    && echo "==> Final parser count:" \
+    && ls /home/devuser/.local/share/nvim/site/parser/*.so 2>/dev/null | wc -l \
+    || (echo "ERROR: treesitter compilation failed" && exit 1)
 
 # =============================================================================
 # Stage 4 — final
@@ -307,13 +305,54 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && python3 --version \
     # Debian names the binary 'fdfind', create an 'fd' symlink for nvim plugins
     && ln -s $(which fdfind) /usr/local/bin/fd \
-    && echo "==> fd symlink created: $(which fd)"
+    && echo "==> fd symlink created: $(which fd)" \
+    # Strip locale/doc/perl bloat pulled in by git and python3 packages
+    # None of this is needed for nvim/LSP operation
+    && rm -rf /usr/share/perl \
+    && rm -rf /usr/share/doc \
+    && rm -rf /usr/share/man \
+    && rm -rf /usr/share/info \
+    && rm -rf /usr/share/zoneinfo \
+    && rm -rf /usr/share/gitweb \
+    && rm -rf /usr/lib/python3.13/test \
+    && rm -rf /usr/lib/python3.13/unittest \
+    && echo "==> Bloat stripped from /usr/share and /usr/lib"
 
 # -----------------------------------------------------------------------------
-# Copy Neovim and Node.js from installer stages
+# Copy Neovim from installer stage
 # -----------------------------------------------------------------------------
 COPY --from=nvim-installer /opt/nvim /opt/nvim
-COPY --from=node-installer /opt/node /opt/node
+
+# -----------------------------------------------------------------------------
+# Copy Node.js — selectively, stripping build-time-only artifacts
+#
+# We copy only what is needed at runtime:
+#   bin/node              — the Node.js runtime (pyright + ts_ls need this)
+#   lib/node_modules/     — LSP node_modules installed by Mason via npm
+#
+# Intentionally NOT copied:
+#   include/              — C headers for native addon compilation (56MB)
+#   lib/node_modules/npm  — package manager, only needed during build (20MB)
+#   lib/node_modules/corepack — not needed anywhere (1.2MB)
+#   share/                — docs (72KB)
+#   *.md, LICENSE         — docs (~600KB)
+# -----------------------------------------------------------------------------
+RUN mkdir -p /opt/node/bin /opt/node/lib/node_modules
+COPY --from=node-installer /opt/node/bin/node /opt/node/bin/node
+COPY --from=node-installer /opt/node/lib/node_modules /opt/node/lib/node_modules
+RUN rm -rf /opt/node/lib/node_modules/npm \
+    && rm -rf /opt/node/lib/node_modules/corepack \
+    && echo "==> Node.js runtime size after stripping:" \
+    && du -sh /opt/node
+
+# -----------------------------------------------------------------------------
+# Copy tree-sitter-cli from builder (installed via npm during build)
+# Needed at runtime if users want to install additional parsers manually.
+# -----------------------------------------------------------------------------
+COPY --from=builder /opt/node/lib/node_modules/tree-sitter-cli \
+                    /opt/node/lib/node_modules/tree-sitter-cli
+COPY --from=builder /opt/node/bin/tree-sitter \
+                    /opt/node/bin/tree-sitter
 
 # -----------------------------------------------------------------------------
 # Add Neovim and Node.js to PATH system-wide
@@ -322,17 +361,7 @@ ENV PATH="/opt/nvim/bin:/opt/node/bin:${PATH}"
 
 RUN echo "==> Verifying binaries on PATH..." \
     && nvim --version | head -3 \
-    && node --version \
-    && npm --version
-
-# -----------------------------------------------------------------------------
-# Copy tree-sitter-cli from builder
-# Needed at runtime only if users install additional parsers manually.
-# -----------------------------------------------------------------------------
-COPY --from=builder /opt/node/lib/node_modules/tree-sitter-cli \
-                    /opt/node/lib/node_modules/tree-sitter-cli
-COPY --from=builder /opt/node/bin/tree-sitter \
-                    /opt/node/bin/tree-sitter
+    && node --version
 
 # -----------------------------------------------------------------------------
 # Recreate devuser with same UID/GID as in builder
@@ -366,7 +395,7 @@ RUN chown -R devuser:devuser /home/devuser \
     && echo "==> Mason bins:" \
     && ls /home/devuser/.local/share/nvim/mason/bin/ \
     && echo "==> Treesitter parsers:" \
-    && ls /home/devuser/.local/share/nvim/lazy/nvim-treesitter/parser/ 2>/dev/null \
+    && ls /home/devuser/.local/share/nvim/site/parser/*.so 2>/dev/null | wc -l \
     || echo "WARNING: no parsers found"
 
 # -----------------------------------------------------------------------------
