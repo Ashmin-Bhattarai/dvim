@@ -198,6 +198,18 @@ RUN echo "==> Cloning LazyVim starter config..." \
     && echo "==> LazyVim starter config installed"
 
 # -----------------------------------------------------------------------------
+# Override blink.cmp to use pure Lua fuzzy implementation
+#
+# blink.cmp is installed from the main branch (not a release tag), so it
+# cannot resolve a GitHub release to download the pre-built Rust binary.
+# The Lua implementation is functionally equivalent and requires no binary,
+# eliminating the "Downloading pre-built binary" message on first launch.
+# -----------------------------------------------------------------------------
+COPY blink-override.lua /home/devuser/.config/nvim/lua/plugins/blink-override.lua
+RUN chown devuser:devuser /home/devuser/.config/nvim/lua/plugins/blink-override.lua \
+    && echo "==> blink.cmp override installed"
+
+# -----------------------------------------------------------------------------
 # Pre-install all lazy.nvim plugins headlessly
 #
 # Run as devuser so all plugin files are created with correct ownership.
