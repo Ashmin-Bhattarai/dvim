@@ -1,0 +1,53 @@
+# =============================================================================
+# ci.yml — Continuous Integration
+#
+# Runs on every pull request to 'develop' and 'main'.
+# Builds the Docker image and runs the full test suite.
+# PRs cannot merge until all tests pass.
+# =============================================================================
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: dvim:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run test suite
+        run: |
+          chmod +x test.sh
+          bash test.sh dvim:ci-test
+
+      - name: Verify docs are in sync
+        run: |
+          cp install.sh docs/install.sh.expected
+          cp launcher/dvim docs/launcher/dvim.expected
+          diff docs/install.sh docs/install.sh.expected \
+            || (echo "ERROR: docs/install.sh is out of sync. Run 'make sync'." && exit 1)
+          diff docs/launcher/dvim docs/launcher/dvim.expected \
+            || (echo "ERROR: docs/launcher/dvim is out of sync. Run 'make sync'." && exit 1)
+          rm -f docs/install.sh.expected docs/launcher/dvim.expected
+          echo "docs/ is in sync."

@@ -1,0 +1,142 @@
+# =============================================================================
+# release.yml — Release Pipeline
+#
+# Triggered by pushing a semantic version tag (e.g. v1.0.0).
+#
+# Workflow:
+#   1. Build Docker image
+#   2. Run full test suite
+#   3. Push to Docker Hub as :vX.Y.Z and :latest
+#   4. Sync docs/ (install.sh + launcher/dvim)
+#   5. Create GitHub Release with auto-generated notes
+#
+# Required GitHub secrets:
+#   DOCKERHUB_USERNAME   — your Docker Hub username (ashminbhattarai)
+#   DOCKERHUB_TOKEN      — Docker Hub access token (not password)
+#                          Create at: https://hub.docker.com/settings/security
+# =============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Build, Test & Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: write   # needed to create GitHub Release and push docs sync
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for release notes
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # 2. Build
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build image for testing
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: dvim:release-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -----------------------------------------------------------------------
+      # 3. Test
+      # -----------------------------------------------------------------------
+      - name: Run test suite
+        run: |
+          chmod +x test.sh
+          bash test.sh dvim:release-test
+
+      # -----------------------------------------------------------------------
+      # 4. Push to Docker Hub
+      # -----------------------------------------------------------------------
+      - name: Push to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ashminbhattarai/dvim:${{ steps.version.outputs.version }}
+            ashminbhattarai/dvim:latest
+          cache-from: type=gha
+
+      - name: Verify Docker Hub push
+        run: |
+          echo "==> Verifying image on Docker Hub..."
+          docker pull ashminbhattarai/dvim:${{ steps.version.outputs.version }}
+          docker pull ashminbhattarai/dvim:latest
+          echo "==> Images verified."
+
+      # -----------------------------------------------------------------------
+      # 5. Sync docs/ and commit back to main
+      # -----------------------------------------------------------------------
+      - name: Sync docs/
+        run: |
+          mkdir -p docs/launcher
+          cp install.sh docs/install.sh
+          cp launcher/dvim docs/launcher/dvim
+
+      - name: Commit docs sync
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/install.sh docs/launcher/dvim
+          git diff --cached --quiet || git commit -m "chore: sync docs for ${{ steps.version.outputs.version }}"
+          git push origin HEAD:main || echo "Nothing to push."
+
+      # -----------------------------------------------------------------------
+      # 6. Create GitHub Release with auto-generated notes
+      # -----------------------------------------------------------------------
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: dvim ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          body: |
+            ## dvim ${{ steps.version.outputs.version }}
+
+            ### Install
+            ```bash
+            curl -fsSL https://dvim.ashmin.info.np/install.sh | bash
+            ```
+
+            ### Install this specific version
+            ```bash
+            curl -fsSL https://dvim.ashmin.info.np/install.sh | bash -s ${{ steps.version.outputs.version }}
+            ```
+
+            ### Docker
+            ```bash
+            docker pull ashminbhattarai/dvim:${{ steps.version.outputs.version }}
+            ```
+
+            ### What's changed
+          make_latest: true
