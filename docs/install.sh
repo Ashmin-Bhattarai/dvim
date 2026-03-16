@@ -3,8 +3,8 @@
 # install.sh — dvim one-command installer
 #
 # Usage:
-#   curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash
-#   curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash -s v1.0
+#   curl -fsSL https://dvim.ashmin.info.np/install.sh | bash
+#   curl -fsSL https://dvim.ashmin.info.np/install.sh | bash -s v1.0
 #
 # What this does:
 #   1. Checks prerequisites (docker, git, curl)

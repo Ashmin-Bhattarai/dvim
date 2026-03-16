@@ -528,7 +528,7 @@
         <div class="install-cmd">
           <span class="prompt">$ </span><span class="cmd-curl">curl</span>
           <span> -fsSL </span>
-          <span class="cmd-url">https://get.dvim.ashmin.info.np/install.sh</span>
+          <span class="cmd-url">https://dvim.ashmin.info.np/install.sh</span>
           <span class="cmd-pipe"> | </span>
           <span class="cmd-bash">bash</span>
         </div>
@@ -593,7 +593,7 @@
 <span class="t-prompt">$ </span><span class="t-cmd">dvim</span> <span class="t-string">myfile.py</span>
 
 <span class="t-comment"># install a specific image tag</span>
-<span class="t-prompt">$ </span><span class="t-cmd">curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash -s v1.0</span>
+<span class="t-prompt">$ </span><span class="t-cmd">curl -fsSL https://dvim.ashmin.info.np/install.sh | bash -s v1.0</span>
 
 <span class="t-comment"># pull latest image and update launcher</span>
 <span class="t-prompt">$ </span><span class="t-cmd">dvim update</span></pre>
@@ -658,7 +658,7 @@
 
 <script>
   function copyInstall(btn) {
-    const cmd = 'curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash';
+    const cmd = 'curl -fsSL https://dvim.ashmin.info.np/install.sh | bash';
     navigator.clipboard.writeText(cmd).then(() => {
       btn.textContent = 'copied!';
       btn.classList.add('copied');

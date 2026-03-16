@@ -3,8 +3,8 @@
 # dvim — Docker Vim launcher
 #
 # Install:
-#   curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash
-#   curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash -s v1.0
+#   curl -fsSL https://dvim.ashmin.info.np/install.sh | bash
+#   curl -fsSL https://dvim.ashmin.info.np/install.sh | bash -s v1.0
 #
 # Usage:
 #   dvim                    open nvim in current directory

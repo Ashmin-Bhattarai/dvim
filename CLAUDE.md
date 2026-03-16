@@ -14,7 +14,7 @@ from anywhere, with optional user and project-level config via simple Lua files.
 - **Docker Hub:** `ashminbhattarai/dvim:latest`
 - **GitHub:** `https://github.com/ashmin-bhattarai/dvim`
 - **Landing page:** `https://dvim.ashmin.info.np`
-- **Install script:** `https://get.dvim.ashmin.info.np/install.sh`
+- **Install script:** `https://dvim.ashmin.info.np/install.sh`
 - **Domain registrar/CDN:** Cloudflare (domain: ashmin.info.np)
 
 ---
@@ -270,10 +270,10 @@ dvim   # after install.sh has been run
 
 ```bash
 # Install
-curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash
+curl -fsSL https://dvim.ashmin.info.np/install.sh | bash
 
 # Install specific tag
-curl -fsSL https://get.dvim.ashmin.info.np/install.sh | bash -s v1.0
+curl -fsSL https://dvim.ashmin.info.np/install.sh | bash -s v1.0
 
 # Update
 dvim update
