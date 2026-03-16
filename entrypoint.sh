@@ -131,25 +131,35 @@ else
 
     # Generate pyrightconfig.json if venv found
     if [ -n "${VENV_PATH}" ]; then
-        PYRIGHT_CONFIG_PATH="/tmp/pyrightconfig.json"
-        log "Setting up pyrightconfig.json"
-
-        # Detect actual Python version from the venv binary
-        # Falls back to 3.12 if detection fails
+        # Detect actual Python version from pyvenv.cfg
+        # This works for uv venvs which symlink to system Python instead of
+        # copying the binary — executing the symlink would fail inside the
+        # container since the host Python path doesn't exist there.
+        # pyvenv.cfg is always written by uv/venv and contains the real version.
         PYTHON_VERSION="3.12"
-        VENV_PYTHON="${VENV_PATH}/bin/python"
-        log "Detected VENV_PYTHON: ${VENV_PYTHON}"
-        if [ -x "${VENV_PYTHON}" ]; then
-            log "Venv Found"
-            DETECTED=$(${VENV_PYTHON} --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
+        PYVENV_CFG="${VENV_PATH}/pyvenv.cfg"
+        if [ -f "${PYVENV_CFG}" ]; then
+            # Parse version_info = 3.13.1 → extract major.minor (3.13)
+            DETECTED=$(grep -i "^version_info" "${PYVENV_CFG}" | grep -oP '\d+\.\d+' | head -1)
             if [ -n "${DETECTED}" ]; then
                 PYTHON_VERSION="${DETECTED}"
-                log "Detected Python version from venv: ${PYTHON_VERSION}"
+                log "Detected Python version from pyvenv.cfg: ${PYTHON_VERSION}"
+            else
+                # Fallback: try 'version' field (some tools write this instead)
+                DETECTED=$(grep -i "^version " "${PYVENV_CFG}" | grep -oP '\d+\.\d+' | head -1)
+                if [ -n "${DETECTED}" ]; then
+                    PYTHON_VERSION="${DETECTED}"
+                    log "Detected Python version from pyvenv.cfg (version field): ${PYTHON_VERSION}"
+                fi
             fi
         else
-            log "Venv Not Found"
+            log "pyvenv.cfg not found — falling back to Python ${PYTHON_VERSION}"
         fi
 
+        # Write pyrightconfig.json to project root so pyright finds it
+        # automatically when it searches from the workspace root.
+        # A cleanup trap removes it when nvim exits — host dir is left clean.
+        PYRIGHT_CONFIG_PATH="${PROJECT_PATH}/pyrightconfig.json"
         log "Generating ${PYRIGHT_CONFIG_PATH} for venv: ${VENV_PATH}"
         cat > "${PYRIGHT_CONFIG_PATH}" << PYRIGHT_EOF
 {
@@ -169,6 +179,9 @@ else
 PYRIGHT_EOF
         chown "${WORKSPACE_UID}:${WORKSPACE_GID}" "${PYRIGHT_CONFIG_PATH}"
         log "pyrightconfig.json generated with venv: $(basename "${VENV_PATH}") (Python ${PYTHON_VERSION})"
+        # Register cleanup — remove the generated config when nvim exits
+        # This keeps the host project dir clean after dvim closes
+        trap "rm -f '${PYRIGHT_CONFIG_PATH}'" EXIT
     fi
 fi
 
