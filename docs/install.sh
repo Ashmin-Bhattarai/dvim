@@ -24,8 +24,6 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 DVIM_TAG="${1:-latest}"
 DVIM_IMAGE="ashminbhattarai/dvim:${DVIM_TAG}"
-DVIM_REPO="https://github.com/ashmin-bhattarai/dvim.git"
-DVIM_REPO_DIR="${HOME}/.local/share/dvim/repo"
 DVIM_BIN_DIR="${HOME}/.local/bin"
 DVIM_CONFIG_DIR="${HOME}/.config/dvim"
 DVIM_STATE_DIR="${HOME}/.local/share/dvim"
@@ -71,7 +69,6 @@ check_cmd() {
 }
 
 check_cmd docker
-check_cmd git
 check_cmd curl
 
 # Check Docker daemon is running
@@ -98,38 +95,20 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 3: Clone or update repo
-# -----------------------------------------------------------------------------
-header "Setting up dvim repo"
-
-mkdir -p "$(dirname "${DVIM_REPO_DIR}")"
-
-if [ -d "${DVIM_REPO_DIR}/.git" ]; then
-  log "Repo already exists, updating..."
-  git -C "${DVIM_REPO_DIR}" pull --ff-only
-  success "Repo updated"
-else
-  log "Cloning dvim repo to ${DVIM_REPO_DIR}..."
-  git clone --depth 1 "${DVIM_REPO}" "${DVIM_REPO_DIR}"
-  success "Repo cloned"
-fi
-
-# -----------------------------------------------------------------------------
-# Step 4: Install launcher
+# Step 3: Install launcher
+# Downloaded directly from GitHub Pages — no local repo clone needed.
+# This keeps the host system clean.
 # -----------------------------------------------------------------------------
 header "Installing launcher"
 
 mkdir -p "${DVIM_BIN_DIR}"
-
-# Try repo first (normal install), fall back to direct download
-if [ -f "${DVIM_REPO_DIR}/launcher/dvim" ]; then
-  install -m755 "${DVIM_REPO_DIR}/launcher/dvim" "${DVIM_BIN_DIR}/dvim"
-else
-  log "Launcher not in repo, downloading directly..."
-  curl -fsSL "https://raw.githubusercontent.com/ashmin-bhattarai/dvim/main/launcher/dvim"     -o "${DVIM_BIN_DIR}/dvim"
+log "Downloading launcher..."
+if curl -fsSL "https://dvim.ashmin.info.np/launcher/dvim" -o "${DVIM_BIN_DIR}/dvim"; then
   chmod +x "${DVIM_BIN_DIR}/dvim"
+  success "Launcher installed: ${DVIM_BIN_DIR}/dvim"
+else
+  die "Failed to download launcher from https://dvim.ashmin.info.np/launcher/dvim"
 fi
-success "Launcher installed: ${DVIM_BIN_DIR}/dvim"
 
 # -----------------------------------------------------------------------------
 # Step 5: Add ~/.local/bin to PATH in ~/.bashrc
